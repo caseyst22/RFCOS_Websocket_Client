@@ -5,19 +5,36 @@ using Newtonsoft.Json.Linq;
 
 namespace Client
 {
-    static class AccessCodes
-    {
-        public const string dev = "GEADEV";
-        public const string qa = "GEAQA";
-        public const string prod = "GEAPROD";
-
-    }
 
     public class TagBlinkReader
     {
         const int RECEIVED_BUFFER_SIZE = 64000;
-        const string ACCESS_CODE = AccessCodes.dev;
-        const string TAG_ID_MASK = "3314052B4C000042";
+        string AccessCode { get; set;}
+        List<string> Masks { get; set; }
+        StreamWriter logWriter { get; set; }
+
+        public TagBlinkReader(bool log, string accessCode, List<string> masks)
+        {
+            this.AccessCode = accessCode;
+            this.Masks = masks;
+
+            if (log) 
+            {
+                string path = System.Reflection.Assembly.GetExecutingAssembly().Location;
+                string fileName = Path.Combine(path, "log.txt");
+                logWriter = new StreamWriter(fileName);
+            }
+            else
+            {
+                logWriter = StreamWriter.Null;
+            }
+        }
+
+        private void Print(string message)
+        {
+            Console.Write(message);
+            logWriter.Write(message);
+        }
 
         protected string ProcessJson(string json)
         {
@@ -27,18 +44,18 @@ namespace Client
             {
                 //Tag Mask
                 string? tagId = (string?)tag["tagID"];
-                if (tagId == null || !tagId.StartsWith(TAG_ID_MASK))
+                if (tagId == null || !Masks.Any(tagId.StartsWith))
                 {
                     jarray.Remove(tag);
-                    Console.WriteLine("Removed tag " + tagId);
+                    Print($"Removed tag {tagId}\n");
                     continue;
                 }
 
                 //Add AccessCode property
-                tag["AccessCode"] = ACCESS_CODE;
+                tag["AccessCode"] = AccessCode;
             }
 
-            Console.WriteLine();
+            Print("\n");
 
             return jarray.ToString();
         }
@@ -73,7 +90,7 @@ namespace Client
                     byte[] rBytes = new byte[RECEIVED_BUFFER_SIZE];
                     ArraySegment<byte> rSeg = new ArraySegment<byte>(rBytes);
 
-                    Console.WriteLine("Start Connection");
+                    Print($"{DateTime.Now}\tStart Connection\n");
 
                     //First message must be a CONNECT frame
                     //Header fields give version and heartbeat (heartbeat tests healthiness of TCP connection)
@@ -91,7 +108,7 @@ namespace Client
                     await os_sock.SendAsync(new ArraySegment<byte>(Encoding.UTF8.GetBytes(subStr)), WebSocketMessageType.Text, true, CancellationToken.None);
 
                     await os_sock.ReceiveAsync(rSeg, CancellationToken.None);
-                    Console.WriteLine("Subscribed\n");
+                    Print($"{DateTime.Now}\tSubscribed\n\n");
 
                     //Create Http Client
                     HttpClient client = new HttpClient()
@@ -124,7 +141,7 @@ namespace Client
 
                             //Construct Json body
                             string body = ProcessJson(tags);
-                            Console.WriteLine(body + "\n");
+                            Print($"{DateTime.Now}\t{body}\n\n");
 
                             // Post to Wave endpoint
                             using StringContent jsonContent = new StringContent(
@@ -135,11 +152,11 @@ namespace Client
                             using HttpResponseMessage response = await client.PostAsync("v6/rfid/rfcontrol/tagsave", jsonContent);
 
                             var jsonResponse = await response.Content.ReadAsStringAsync();
-                            Console.WriteLine($"{response.StatusCode}: {jsonResponse}\n");
+                            Print($"{DateTime.Now}\t{response.StatusCode}: {jsonResponse}\n\n");
                         }
                         catch (Exception e)
                         {
-                            Console.WriteLine(e.Message);
+                            Print($"{DateTime.Now}\t{e.Message}\n\n");
                         }
 
                         //Send out byte to keep alive
@@ -151,7 +168,11 @@ namespace Client
             }
             catch (Exception e)
             {
-                Console.WriteLine(e.Message);
+                Print($"{DateTime.Now}\t{e.Message}\n\n");
+            }
+            finally
+            {
+                logWriter.Close();
             }
         }
     }
