@@ -19,7 +19,7 @@ namespace Client
         const string ACCESS_CODE = AccessCodes.dev;
         const string TAG_ID_MASK = "3314052B4C000042";
 
-        private string ProcessJson(string json)
+        protected string ProcessJson(string json)
         {
             JArray jarray = JArray.Parse(json);
             
@@ -38,27 +38,9 @@ namespace Client
                 tag["AccessCode"] = ACCESS_CODE;
             }
 
-            Console.WriteLine("Remaining Tags:");
-            foreach (var tag in jarray) Console.WriteLine(tag["tagID"] + " " + tag["AccessCode"]);
             Console.WriteLine();
 
             return jarray.ToString();
-        }
-
-        private string InsertAccessCodes(string tags, string code)
-        {
-            string body = tags;
-            string insertString = $"\"AccessCode\":\"{code}\",";
-            int i = 0;
-            while (i < body.Length)
-            {
-                if (body[i++] == '{')
-                {
-                    body = body.Insert(i, insertString);
-                    i += insertString.Length;
-                }
-            }
-            return body;
         }
 
         public async Task ReadRFServAsync()
@@ -119,39 +101,46 @@ namespace Client
 
                     while (true)
                     {
-                        int numberBytesReceived = 0;
-                        WebSocketReceiveResult ws;
-
-                        ws = await os_sock.ReceiveAsync(new ArraySegment<byte>(rBytes, numberBytesReceived, (RECEIVED_BUFFER_SIZE - numberBytesReceived)), CancellationToken.None);
-                        numberBytesReceived = ws.Count;
-
-                        //STOMP packets can extend multiple buffers, keep checking and reading until entire package is done
-                        while ((ws.EndOfMessage == false) && numberBytesReceived < RECEIVED_BUFFER_SIZE)
+                        try
                         {
+                            int numberBytesReceived = 0;
+                            WebSocketReceiveResult ws;
+
                             ws = await os_sock.ReceiveAsync(new ArraySegment<byte>(rBytes, numberBytesReceived, (RECEIVED_BUFFER_SIZE - numberBytesReceived)), CancellationToken.None);
-                            numberBytesReceived += ws.Count;
+                            numberBytesReceived = ws.Count;
+
+                            //STOMP packets can extend multiple buffers, keep checking and reading until entire package is done
+                            while ((ws.EndOfMessage == false) && numberBytesReceived < RECEIVED_BUFFER_SIZE)
+                            {
+                                ws = await os_sock.ReceiveAsync(new ArraySegment<byte>(rBytes, numberBytesReceived, (RECEIVED_BUFFER_SIZE - numberBytesReceived)), CancellationToken.None);
+                                numberBytesReceived += ws.Count;
+                            }
+
+                            string info  = Encoding.Default.GetString(rBytes); //convert to string
+
+                            //Parse STOMP message
+                            string[] headers = info.Split('\n'); //Initial header fields of stomp protocol use line feeds to separate fields. Body of message is after a blank line feed
+                            string tags = headers[headers.GetUpperBound(0)]; //Body is last index of headers
+
+                            //Construct Json body
+                            string body = ProcessJson(tags);
+                            Console.WriteLine(body + "\n");
+
+                            // Post to Wave endpoint
+                            using StringContent jsonContent = new StringContent(
+                                body,
+                                Encoding.UTF8,
+                                MediaTypeNames.Application.Json
+                            );
+                            using HttpResponseMessage response = await client.PostAsync("v6/rfid/rfcontrol/tagsave", jsonContent);
+
+                            var jsonResponse = await response.Content.ReadAsStringAsync();
+                            Console.WriteLine($"{response.StatusCode}: {jsonResponse}\n");
                         }
-
-                        string info  = Encoding.Default.GetString(rBytes); //convert to string
-
-                        //Parse STOMP message
-                        string[] headers = info.Split('\n'); //Initial header fields of stomp protocol use line feeds to separate fields. Body of message is after a blank line feed
-                        string tags = headers[headers.GetUpperBound(0)]; //Body is last index of headers
-
-                        //Construct Json body
-                        string body = ProcessJson(tags);
-                        Console.WriteLine(body + "\n");
-
-                        // Post to Wave endpoint
-                        using StringContent jsonContent = new StringContent(
-                            body,
-                            Encoding.UTF8,
-                            MediaTypeNames.Application.Json
-                        );
-                        using HttpResponseMessage response = await client.PostAsync("v6/rfid/rfcontrol/tagsave", jsonContent);
-
-                        var jsonResponse = await response.Content.ReadAsStringAsync();
-                        Console.WriteLine($"{response.StatusCode}: {jsonResponse}\n");
+                        catch (Exception e)
+                        {
+                            Console.WriteLine(e.Message);
+                        }
 
                         //Send out byte to keep alive
                         string contStr = "\n";
