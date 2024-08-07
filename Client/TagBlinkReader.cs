@@ -20,7 +20,7 @@ namespace Client
 
             if (log) 
             {
-                string path = Path.Combine(Directory.GetCurrentDirectory(), $"logfile_{DateTime.Now.Date}");
+                string path = Path.Combine(Directory.GetCurrentDirectory(), "logfile");
                 logWriter = new StreamWriter(path);
             }
             else
