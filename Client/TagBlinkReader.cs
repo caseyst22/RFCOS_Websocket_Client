@@ -179,7 +179,7 @@ namespace Client
 
                             //Construct Json body
                             string body = ProcessJson(tags);
-                            Print($"{body}\n\n");
+                            Print($"\n{body}\n\n");
 
                             //Post to Wave endpoint
                             using StringContent jsonContent = new StringContent(
