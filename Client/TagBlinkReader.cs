@@ -48,7 +48,7 @@ namespace Client
             {
                 //Tag Mask
                 string? tagId = (string?)tag["tagID"];
-                if (tagId == null || !Masks.Any(tagId.StartsWith))
+                if (tagId == null || (Masks.Count > 0 && !Masks.Any(tagId.StartsWith)))
                 {
                     jarray.Remove(tag);
                     Print($"Removed tag {tagId}\n");
