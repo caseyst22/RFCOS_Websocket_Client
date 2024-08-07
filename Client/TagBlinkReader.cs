@@ -37,6 +37,11 @@ namespace Client
 
         protected string ProcessJson(string json)
         {
+            if (json.Length == 0)
+            {
+                throw new Exception("No tags read");
+            }
+
             JArray jarray = JArray.Parse(json);
             
             foreach (var tag in jarray.ToList())
