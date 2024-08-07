@@ -1,5 +1,5 @@
-using System.Net.Mime;
 using System.Net.WebSockets;
+using System.Net.Mime;
 using System.Text;
 using Newtonsoft.Json.Linq;
 
@@ -20,9 +20,8 @@ namespace Client
 
             if (log) 
             {
-                string path = System.Reflection.Assembly.GetExecutingAssembly().Location;
-                string fileName = Path.Combine(path, "log.txt");
-                logWriter = new StreamWriter(fileName);
+                string path = Path.Combine(Directory.GetCurrentDirectory(), "logfile");
+                logWriter = new StreamWriter(path);
             }
             else
             {
@@ -33,7 +32,7 @@ namespace Client
         private void Print(string message)
         {
             Console.Write(message);
-            logWriter.Write(message);
+            logWriter.Write($"{DateTime.Now}\t{message}");
         }
 
         protected string ProcessJson(string json)
@@ -72,17 +71,39 @@ namespace Client
                 string UserName = "admin"; 
                 string Password = "admin";
 
-                ClientWebSocket os_sock = new ClientWebSocket();
-
-                //Set header
+                //Create Header
                 string encStr = UserName + ":" + Password;
                 byte[] encBytes = Encoding.UTF8.GetBytes(encStr);
                 encStr = Convert.ToBase64String(encBytes);
-                os_sock.Options.SetRequestHeader("Authorization", "Basic " + encStr);
 
+                //Create uri
                 Uri uri = new Uri(url_s);
 
-                await os_sock.ConnectAsync(uri, CancellationToken.None);
+                ClientWebSocket os_sock = new ClientWebSocket();
+
+                //Wait for connection
+                int attempt = 0, maxAttempts = 30;
+                while (os_sock.State != WebSocketState.Open)
+                {
+                    //Exit if maxAttempts is reached
+                    if (attempt++ == maxAttempts)
+                    {
+                        throw new Exception("Unable to establish stream");
+                    }
+
+                    Print($"Attempting to establish stream: Attempt {attempt}\n");
+                    try
+                    {
+                        os_sock.Options.SetRequestHeader("Authorization", "Basic " + encStr);
+                        await os_sock.ConnectAsync(uri, CancellationToken.None);
+                    }
+                    catch (Exception e) 
+                    {
+                        Print($"{e.Message}\n\n");
+                        await Task.Delay(30000); //Wait for 30 seconds before retrying
+                        os_sock = new ClientWebSocket();
+                    }
+                }
 
                 /* Stream is open */
                 if (os_sock.State == WebSocketState.Open)
@@ -90,7 +111,7 @@ namespace Client
                     byte[] rBytes = new byte[RECEIVED_BUFFER_SIZE];
                     ArraySegment<byte> rSeg = new ArraySegment<byte>(rBytes);
 
-                    Print($"{DateTime.Now}\tStart Connection\n");
+                    Print("Start Connection\n");
 
                     //First message must be a CONNECT frame
                     //Header fields give version and heartbeat (heartbeat tests healthiness of TCP connection)
@@ -108,7 +129,7 @@ namespace Client
                     await os_sock.SendAsync(new ArraySegment<byte>(Encoding.UTF8.GetBytes(subStr)), WebSocketMessageType.Text, true, CancellationToken.None);
 
                     await os_sock.ReceiveAsync(rSeg, CancellationToken.None);
-                    Print($"{DateTime.Now}\tSubscribed\n\n");
+                    Print("Subscribed\n\n");
 
                     //Create Http Client
                     HttpClient client = new HttpClient()
@@ -141,9 +162,9 @@ namespace Client
 
                             //Construct Json body
                             string body = ProcessJson(tags);
-                            Print($"{DateTime.Now}\t{body}\n\n");
+                            Print($"{body}\n\n");
 
-                            // Post to Wave endpoint
+                            //Post to Wave endpoint
                             using StringContent jsonContent = new StringContent(
                                 body,
                                 Encoding.UTF8,
@@ -156,19 +177,18 @@ namespace Client
                         }
                         catch (Exception e)
                         {
-                            Print($"{DateTime.Now}\t{e.Message}\n\n");
+                            Print($"{e.Message}\n\n");
                         }
 
                         //Send out byte to keep alive
                         string contStr = "\n";
                         await os_sock.SendAsync(new ArraySegment<byte>(Encoding.UTF8.GetBytes(contStr)), WebSocketMessageType.Text, true, CancellationToken.None);
                     }
-
                 }
             }
             catch (Exception e)
             {
-                Print($"{DateTime.Now}\t{e.Message}\n\n");
+                Print($"{e.Message}\n\n");
             }
             finally
             {
