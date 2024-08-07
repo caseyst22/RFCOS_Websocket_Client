@@ -20,7 +20,7 @@ namespace Client
 
             if (log) 
             {
-                string path = Path.Combine(Directory.GetCurrentDirectory(), "logfile");
+                string path = Path.Combine(Directory.GetCurrentDirectory(), $"logfile_{DateTime.Now.Date}");
                 logWriter = new StreamWriter(path);
             }
             else
@@ -141,20 +141,32 @@ namespace Client
                     {
                         try
                         {
-                            int numberBytesReceived = 0;
+                            StringBuilder messageBuilder = new StringBuilder();
                             WebSocketReceiveResult ws;
 
-                            ws = await os_sock.ReceiveAsync(new ArraySegment<byte>(rBytes, numberBytesReceived, (RECEIVED_BUFFER_SIZE - numberBytesReceived)), CancellationToken.None);
-                            numberBytesReceived = ws.Count;
-
-                            //STOMP packets can extend multiple buffers, keep checking and reading until entire package is done
-                            while ((ws.EndOfMessage == false) && numberBytesReceived < RECEIVED_BUFFER_SIZE)
+                            do
                             {
-                                ws = await os_sock.ReceiveAsync(new ArraySegment<byte>(rBytes, numberBytesReceived, (RECEIVED_BUFFER_SIZE - numberBytesReceived)), CancellationToken.None);
-                                numberBytesReceived += ws.Count;
+                                ws = await os_sock.ReceiveAsync(rSeg, CancellationToken.None);
+                                messageBuilder.Append(Encoding.UTF8.GetString(rBytes, 0, ws.Count));
                             }
+                            while (!ws.EndOfMessage);
 
-                            string info  = Encoding.Default.GetString(rBytes); //convert to string
+                            string info = messageBuilder.ToString();
+
+                            // int numberBytesReceived = 0;
+                            // WebSocketReceiveResult ws;
+
+                            // ws = await os_sock.ReceiveAsync(new ArraySegment<byte>(rBytes, numberBytesReceived, (RECEIVED_BUFFER_SIZE - numberBytesReceived)), CancellationToken.None);
+                            // numberBytesReceived = ws.Count;
+
+                            // //STOMP packets can extend multiple buffers, keep checking and reading until entire package is done
+                            // while ((ws.EndOfMessage == false) && numberBytesReceived < RECEIVED_BUFFER_SIZE)
+                            // {
+                            //     ws = await os_sock.ReceiveAsync(new ArraySegment<byte>(rBytes, numberBytesReceived, (RECEIVED_BUFFER_SIZE - numberBytesReceived)), CancellationToken.None);
+                            //     numberBytesReceived += ws.Count;
+                            // }
+
+                            // string info  = Encoding.Default.GetString(rBytes); //convert to string
 
                             //Parse STOMP message
                             string[] headers = info.Split('\n'); //Initial header fields of stomp protocol use line feeds to separate fields. Body of message is after a blank line feed
@@ -173,7 +185,7 @@ namespace Client
                             using HttpResponseMessage response = await client.PostAsync("v6/rfid/rfcontrol/tagsave", jsonContent);
 
                             var jsonResponse = await response.Content.ReadAsStringAsync();
-                            Print($"{DateTime.Now}\t{response.StatusCode}: {jsonResponse}\n\n");
+                            Print($"{response.StatusCode}: {jsonResponse}\n\n");
                         }
                         catch (Exception e)
                         {
