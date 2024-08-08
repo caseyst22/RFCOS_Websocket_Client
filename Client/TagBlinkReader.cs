@@ -35,14 +35,14 @@ namespace Client
             logWriter.Write($"{DateTime.Now}\t{message}");
         }
 
-        protected string ProcessJson(string json)
+        protected string ProcessTags(string tags)
         {
-            if (json.Length == 0)
+            if (tags.Length == 0)
             {
                 throw new Exception("No tags read");
             }
 
-            JArray jarray = JArray.Parse(json);
+            JArray jarray = JArray.Parse(tags);
             
             foreach (var tag in jarray.ToList())
             {
@@ -62,6 +62,42 @@ namespace Client
             Print("\n");
 
             return jarray.ToString();
+        }
+
+        protected string ProcessRegionUpdate(string json)
+        {
+            if (json.Length == 0)
+            {
+                throw new Exception("Json has length 0");
+            }
+
+            JObject jobject = JObject.Parse(json);
+            jobject.Add("AccessCode", AccessCode);
+
+            return jobject.ToString();
+        }
+
+        protected string ProcessJson(string info, out bool regionUpdate)
+        {
+            //Parse STOMP message
+            string[] headers = info.Split('\n'); //Initial header fields of stomp protocol use line feeds to separate fields. Body of message is after a blank line feed
+            string body = headers[headers.GetUpperBound(0)]; //Body is last index of headers
+            string? endpoint = headers.Where(header => header.StartsWith("destination")).FirstOrDefault();
+
+            if (endpoint == null)
+            {
+                throw new Exception("No endpoint found in header");
+            }
+            else if (endpoint.Contains("regionUpdate"))
+            {
+                regionUpdate = true;
+                return ProcessRegionUpdate(body);
+            }
+            else
+            {
+                regionUpdate = false;
+                return ProcessTags(body);
+            }
         }
 
         public async Task ReadRFServAsync()
@@ -134,7 +170,16 @@ namespace Client
                     await os_sock.SendAsync(new ArraySegment<byte>(Encoding.UTF8.GetBytes(subStr)), WebSocketMessageType.Text, true, CancellationToken.None);
 
                     await os_sock.ReceiveAsync(rSeg, CancellationToken.None);
-                    Print("Subscribed\n\n");
+                    Print("Subscribed to tagBlinkLite\n");
+
+                    idnum = 1;
+                    idNumS = idnum.ToString();
+
+                    subStr = "SUBSCRIBE\nid: " + idNumS + "\ndestination:/topic/regionUpdate.*\nack:auto\n\n\u0000";
+                    await os_sock.SendAsync(new ArraySegment<byte>(Encoding.UTF8.GetBytes(subStr)), WebSocketMessageType.Text, true, CancellationToken.None);
+
+                    await os_sock.ReceiveAsync(rSeg, CancellationToken.None);
+                    Print("Subscribed to regionUpdate\n\n");
 
                     //Create Http Client
                     HttpClient client = new HttpClient()
@@ -155,42 +200,23 @@ namespace Client
                                 messageBuilder.Append(Encoding.UTF8.GetString(rBytes, 0, ws.Count));
                             }
                             while (!ws.EndOfMessage);
-
                             string info = messageBuilder.ToString();
 
-                            // int numberBytesReceived = 0;
-                            // WebSocketReceiveResult ws;
-
-                            // ws = await os_sock.ReceiveAsync(new ArraySegment<byte>(rBytes, numberBytesReceived, (RECEIVED_BUFFER_SIZE - numberBytesReceived)), CancellationToken.None);
-                            // numberBytesReceived = ws.Count;
-
-                            // //STOMP packets can extend multiple buffers, keep checking and reading until entire package is done
-                            // while ((ws.EndOfMessage == false) && numberBytesReceived < RECEIVED_BUFFER_SIZE)
-                            // {
-                            //     ws = await os_sock.ReceiveAsync(new ArraySegment<byte>(rBytes, numberBytesReceived, (RECEIVED_BUFFER_SIZE - numberBytesReceived)), CancellationToken.None);
-                            //     numberBytesReceived += ws.Count;
-                            // }
-
-                            // string info  = Encoding.Default.GetString(rBytes); //convert to string
-
-                            //Parse STOMP message
-                            string[] headers = info.Split('\n'); //Initial header fields of stomp protocol use line feeds to separate fields. Body of message is after a blank line feed
-                            string tags = headers[headers.GetUpperBound(0)]; //Body is last index of headers
-
                             //Construct Json body
-                            string body = ProcessJson(tags);
+                            string body = ProcessJson(info, out bool regionUpdate);
                             Print($"\n{body}\n\n");
 
                             //Post to Wave endpoint
-                            using StringContent jsonContent = new StringContent(
-                                body,
-                                Encoding.UTF8,
-                                MediaTypeNames.Application.Json
-                            );
-                            using HttpResponseMessage response = await client.PostAsync("v6/rfid/rfcontrol/tagsave", jsonContent);
+                            // string endpoint = regionUpdate ? "v6/rfid/rfcontrol/heartbeatsave" : "v6/rfid/rfcontrol/tagsave";
+                            // using StringContent jsonContent = new StringContent(
+                            //     body,
+                            //     Encoding.UTF8,
+                            //     MediaTypeNames.Application.Json
+                            // );
+                            // using HttpResponseMessage response = await client.PostAsync(endpoint, jsonContent);
 
-                            var jsonResponse = await response.Content.ReadAsStringAsync();
-                            Print($"{response.StatusCode}: {jsonResponse}\n\n");
+                            // var jsonResponse = await response.Content.ReadAsStringAsync();
+                            // Print($"{response.StatusCode}: {jsonResponse}\n\n");
                         }
                         catch (Exception e)
                         {
